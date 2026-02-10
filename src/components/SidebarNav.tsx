@@ -10,6 +10,15 @@ import {
   type ConversationSummaryItem,
 } from "@/data/mock-chat-history";
 import { MOCK_DRAIN_DETAIL } from "@/data/mock-drain-detail";
+import Dock from "@/components/ui/dock";
+import {
+  LayoutDashboard,
+  MessageCircle,
+  Truck,
+  ClipboardList,
+  Settings,
+} from "lucide-react";
+import { NeonButton } from "@/components/ui/neon-button";
 
 /** 주소에서 시 단위 추출 후 표준명 반환 (예: "서울시" → "서울특별시") */
 function getCityFromAddress(address: string): string {
@@ -170,6 +179,8 @@ export default function SidebarNav({
 
   return (
     <aside
+      role="navigation"
+      aria-label="메인 메뉴"
       className={`shrink-0 flex flex-col bg-[#1a1d24] text-white min-h-0 transition-[width] duration-200 ${
         collapsed ? "w-16" : "w-64"
       }`}
@@ -198,53 +209,91 @@ export default function SidebarNav({
         )}
       </div>
 
-      {/* 메인 네비: Overview, Chat, 자원현황, Settings (위치 고정) */}
-      <nav className="p-2 space-y-0.5">
-        <button
-          type="button"
-          onClick={() => onMainViewChange("overview")}
-          className={navItemClass("overview")}
-          title="Overview"
-        >
-          <span className="w-5 h-5 grid place-items-center text-sm shrink-0" aria-hidden>▦</span>
-          {!collapsed && <span>Overview</span>}
-        </button>
-        <button
-          type="button"
-          onClick={() => onMainViewChange("chat")}
-          className={navItemClass("chat")}
-          title="Chat"
-        >
-          <span className="w-5 h-5 grid place-items-center text-sm shrink-0" aria-hidden>💬</span>
-          {!collapsed && <span>Chat</span>}
-        </button>
-        <button
-          type="button"
-          onClick={() => onMainViewChange("resources")}
-          className={navItemClass("resources")}
-          title="자원현황"
-        >
-          <span className="w-5 h-5 grid place-items-center text-sm shrink-0" aria-hidden>🚗</span>
-          {!collapsed && <span>자원현황</span>}
-        </button>
-        <button
-          type="button"
-          onClick={() => onMainViewChange("tasks")}
-          className={navItemClass("tasks")}
-          title="작업관리"
-        >
-          <span className="w-5 h-5 grid place-items-center text-sm shrink-0" aria-hidden>📋</span>
-          {!collapsed && <span>작업관리</span>}
-        </button>
-        <button
-          type="button"
-          className={`${btnBase} ${collapsed ? "justify-center px-0" : "px-3"}`}
-          title="Settings"
-        >
-          <span className="w-5 h-5 grid place-items-center text-sm shrink-0" aria-hidden>⚙</span>
-          {!collapsed && <span>Settings</span>}
-        </button>
-      </nav>
+      {/* 메인 네비: 새 Dock (호버 시 확대·툴팁, 활성 인디케이터) / 접힌 상태는 아이콘 버튼 */}
+      {collapsed ? (
+        <nav className="p-2 space-y-0.5">
+          <button
+            type="button"
+            onClick={() => onMainViewChange("overview")}
+            className={navItemClass("overview")}
+            title="Overview"
+          >
+            <LayoutDashboard className="w-5 h-5 shrink-0" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onMainViewChange("chat")}
+            className={navItemClass("chat")}
+            title="Chat"
+          >
+            <MessageCircle className="w-5 h-5 shrink-0" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onMainViewChange("resources")}
+            className={navItemClass("resources")}
+            title="자원현황"
+          >
+            <Truck className="w-5 h-5 shrink-0" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onMainViewChange("tasks")}
+            className={navItemClass("tasks")}
+            title="작업관리"
+          >
+            <ClipboardList className="w-5 h-5 shrink-0" />
+          </button>
+          <button
+            type="button"
+            className={`${btnBase} justify-center px-0`}
+            title="Settings"
+          >
+            <Settings className="w-5 h-5 shrink-0" />
+          </button>
+        </nav>
+      ) : (
+        <nav className="shrink-0 flex justify-center pt-2 pb-2 overflow-y-auto [--background:0_0%_10%] [--primary:173_80%_45%]">
+          <Dock
+            direction="vertical"
+            className="dock-sidebar py-1 [&_.rounded-2xl]:bg-white/10 [&_.rounded-2xl]:border-white/20"
+            activeLabel={
+              mainView === "overview"
+                ? "Overview"
+                : mainView === "chat"
+                  ? "Chat"
+                  : mainView === "resources"
+                    ? "자원현황"
+                    : mainView === "tasks"
+                      ? "작업관리"
+                      : null
+            }
+            items={[
+              {
+                icon: LayoutDashboard,
+                label: "Overview",
+                onClick: () => onMainViewChange("overview"),
+              },
+              {
+                icon: MessageCircle,
+                label: "Chat",
+                onClick: () => onMainViewChange("chat"),
+              },
+              {
+                icon: Truck,
+                label: "자원현황",
+                onClick: () => onMainViewChange("resources"),
+              },
+              {
+                icon: ClipboardList,
+                label: "작업관리",
+                onClick: () => onMainViewChange("tasks"),
+              },
+              { icon: Settings, label: "Settings" },
+            ]}
+          />
+        </nav>
+      )}
 
       {/* 새 채팅, 내 항목 - Settings 아래, Chat 화면에서만 표시 */}
       {!collapsed && mainView === "chat" && (
@@ -304,13 +353,15 @@ export default function SidebarNav({
           </div>
           {onOptimizeRoute && (
             <div className="px-2 pb-3">
-              <button
+              <NeonButton
                 type="button"
                 onClick={onOptimizeRoute}
-                className="w-full rounded-lg bg-teal-600/80 px-3 py-2 text-sm font-semibold text-white hover:bg-teal-600 transition-colors"
+                variant="solid"
+                size="default"
+                className="w-full text-sm font-semibold"
               >
                 최적 동선 분석
-              </button>
+              </NeonButton>
             </div>
           )}
           <ul className="flex-1 overflow-y-auto px-2 pb-4 space-y-1">

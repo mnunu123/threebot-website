@@ -10,7 +10,7 @@ import RightPanel from "@/components/RightPanel";
 import ChatView from "@/components/ChatView";
 import type { ChatMessage, ChatRoom } from "@/components/ChatView";
 import ResourcesView from "./ResourcesView";
-import TaskManagementView from "./TaskManagementView";
+import TaskManagementView from "@/components/TaskManagementView";
 import type { FlyToFn } from "@/components/NaverMap";
 import type { StormDrainItem } from "@/types/storm-drain";
 import type { MainViewType } from "@/constants/main-view";
@@ -19,6 +19,8 @@ import { getDrainIdByManageNo } from "@/data/mock-drain-detail";
 import { computeOptimalRoute } from "@/lib/optimal-route";
 import type { DistrictPolygon } from "@/data/district-boundaries";
 import { MovingBorderButton } from "@/components/ui/moving-border-button";
+import { getEnvConfig } from "@/config/env";
+import { isValidDrainCode } from "@/lib/validation";
 import DashboardMapFilters, {
   getDefaultFilterValues,
   type MapFilterValues,
@@ -60,9 +62,6 @@ function saveChatsToStorage(chats: ChatRoom[], selectedChatId: string | null) {
 }
 
 const NaverMap = dynamic(() => import("@/components/NaverMap"), { ssr: false });
-
-const NAVER_CLIENT_ID = process.env.NEXT_PUBLIC_NAVER_MAP_CLIENT_ID ?? "";
-
 /** URL과 화면 매핑: /chat → chat, /resources → resources, /tasks → tasks, 그 외(/) → overview. */
 function mainViewFromPathname(pathname: string | null): MainViewType {
   if (pathname === "/chat") return "chat";
@@ -81,6 +80,7 @@ export default function StormDrainLayout() {
   const pathname = usePathname();
   const router = useRouter();
   const mainView = mainViewFromPathname(pathname);
+  const naverClientId = getEnvConfig().NAVER_MAP_CLIENT_ID;
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -285,9 +285,10 @@ export default function StormDrainLayout() {
     flyToRef.current?.(item.lat, item.lng);
   }, []);
 
-  /** 배수구 코드(AA-013 등)로 선택 후 지도 이동 */
+  /** 배수구 코드(AA-013 등)로 선택 후 지도 이동 - GS 인증: 입력 검증 적용 */
   const handleSelectByCode = useCallback(
     (code: string) => {
+      if (!isValidDrainCode(code)) return;
       const drainId = getDrainIdByManageNo(code);
       if (!drainId) return;
       const item = MOCK_STORM_DRAINS.find((d) => d.id === drainId);
@@ -318,7 +319,7 @@ export default function StormDrainLayout() {
   }, [filteredDrainItems]);
 
   return (
-    <div className="h-screen flex flex-col bg-[#e8eaed]">
+    <div className="h-screen flex flex-col bg-[#e8eaed]" role="application" aria-label="빗물받이 현황 관리">
       <div className="flex-1 flex min-h-0">
         <SidebarNav
           items={filteredDrainItems}
@@ -345,6 +346,8 @@ export default function StormDrainLayout() {
           onOptimizeRoute={mainView === "overview" ? handleOptimizeRoute : undefined}
         />
 
+        {/* GS 인증: main-content로 스킵 링크 대상 지정 */}
+        <div id="main-content" className="flex-1 flex min-h-0 min-w-0" tabIndex={-1}>
         {/* Chat 선택 시: Chat 전용 화면만 (상단 헤더·우측 패널 없음) */}
         {mainView === "chat" && (
           <div className="flex-1 flex flex-col min-h-0 min-w-0">
@@ -375,13 +378,10 @@ export default function StormDrainLayout() {
             <TopHeader onSearch={handleSelectByCode} drainItems={filteredDrainItems} />
             <div className="flex-1 flex min-h-0 min-w-0 relative">
               <main className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">
-                {NAVER_CLIENT_ID ? (
+                {naverClientId ? (
                   <>
                     <div className="flex-1 min-h-0 flex flex-col mx-2 mt-2 rounded-lg overflow-hidden bg-white border border-gray-200 shadow-sm">
                       <div className="px-3 py-2 border-b border-gray-200 space-y-1">
-                        <p className="text-xs text-teal-600 font-medium">
-                          한눈에 파악하는 도시 동맥(하수관·빗물받이) 상태
-                        </p>
                         <div className="flex items-center justify-between gap-2">
                           <h2 className="font-semibold text-gray-800">빗물받이 현황</h2>
                           <MovingBorderButton
@@ -429,7 +429,7 @@ export default function StormDrainLayout() {
                           selectedDistrictName={selectedDistrictName}
                           onDistrictClick={({ name }) => setSelectedDistrictName(name)}
                           showHeatmap={showHeatmap}
-                          clientId={NAVER_CLIENT_ID}
+                          clientId={naverClientId}
                         />
                       </div>
                       <MapLegend />
@@ -451,6 +451,7 @@ export default function StormDrainLayout() {
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

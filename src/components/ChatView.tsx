@@ -194,18 +194,19 @@ export default function ChatView({ chat, onUpdateChat }: ChatViewProps) {
     scrollEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!query.trim() || loading || !chat) return;
+  /** 사용자 입력을 메시지로 추가한 뒤 LLM에 보내고 응답을 채팅에 반영 */
+  const sendMessage = async (userInput: string) => {
+    const trimmed = userInput.trim();
+    if (!trimmed || loading || !chat) return;
 
-    const userInput = query.trim();
     setQuery("");
     setError(null);
-    const userMsg: ChatMessage = { id: genId(), role: "user", content: userInput };
+    setHighlight("");
+    const userMsg: ChatMessage = { id: genId(), role: "user", content: trimmed };
     const newMessages = [...messages, userMsg];
     const isFirstUserMessage = messages.filter((m) => m.role === "user").length === 0;
     const newTitle = isFirstUserMessage
-      ? userInput.slice(0, 30) + (userInput.length > 30 ? "…" : "")
+      ? trimmed.slice(0, 30) + (trimmed.length > 30 ? "…" : "")
       : undefined;
     onUpdateChat(chat.id, { messages: newMessages, ...(newTitle && { title: newTitle }) });
     setLoading(true);
@@ -230,6 +231,11 @@ export default function ChatView({ chat, onUpdateChat }: ChatViewProps) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await sendMessage(query);
   };
 
   const hasMessages = messages.length > 0;
@@ -312,10 +318,8 @@ export default function ChatView({ chat, onUpdateChat }: ChatViewProps) {
                   key={text}
                   highlight={highlight}
                   className="text-foreground border-border bg-background/80 hover:bg-accent"
-                  onClick={() => {
-                    setQuery(text);
-                    setHighlight("");
-                  }}
+                  onClick={() => sendMessage(text)}
+                  disabled={loading}
                 >
                   {text}
                 </PromptSuggestion>

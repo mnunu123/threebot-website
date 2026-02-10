@@ -28,6 +28,22 @@ body {
   background: hsl(var(--background));
 }
 
+/* GS 인증 / WCAG: 키보드 포커스 시각화 - 포커스 링 명확 표시 */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring, 0 0% 3.9%));
+  outline-offset: 2px;
+}
+
+/* 포커스 시 링 오프셋 유지 (버튼 등) */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid hsl(var(--ring, 0 0% 3.9%));
+  outline-offset: 2px;
+}
+
 /* Chat 화면 다크 테마 (Button / PromptSuggestion 스타일 적용) - 호버 없이도 텍스트·버튼 선명하게 */
 .chat-view-root {
   color: hsl(0 0% 98%);
@@ -56,4 +72,20 @@ body {
   width: 100%;
   height: 100%;
   min-height: 400px;
+}
+
+/* AetherUI 스타일: glass-effect 사이드바 */
+.glass-effect {
+  background: rgba(26, 29, 36, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.nav-link {
+  text-decoration: none;
+}
+.nav-link.active {
+  background: rgba(99, 102, 241, 0.2);
+  color: white;
 }
