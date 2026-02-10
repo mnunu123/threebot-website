@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { StormDrainItem } from "@/types/storm-drain";
+import type { DrainDetailDummy } from "@/data/mock-drain-detail";
 import {
   MOCK_DRAIN_DETAIL,
   MOCK_PRIORITY_VISIT,
@@ -12,14 +13,17 @@ type TabId = "info" | "ai" | "priority" | "schedule";
 
 export default function RightPanel({
   item,
+  detail: detailProp,
   onClose,
   onPriorityItemSelect,
 }: {
   item: StormDrainItem;
+  /** API 연동 시 상세 정보. 없으면 목업에서 조회 */
+  detail?: DrainDetailDummy | null;
   onClose?: () => void;
   onPriorityItemSelect?: (code: string) => void;
 }) {
-  const detail = MOCK_DRAIN_DETAIL[item.id];
+  const detail = detailProp ?? MOCK_DRAIN_DETAIL[item.id];
   const [activeTab, setActiveTab] = useState<TabId>("info");
 
   const tabs: { id: TabId; label: string }[] = [

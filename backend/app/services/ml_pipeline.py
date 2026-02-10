@@ -1,27 +1,26 @@
 """ML 분석 파이프라인: 데이터 수신 시 트리거 또는 주기적 DB 읽기.
 
-Stats Team(ML)이 구현할 실제 분석 로직과 연동하는 인터페이스.
-현재는 더미 업데이트로 동작. ML 팀이 DB에 직접 priority_score, risk_reason 등을 써도 됨.
+- CRI 산출: 쓰레기 부피(trash_vol) + 저지대(elevation_type=lowland) 가중치 반영
+- 실시간성: ingestion에서 BackgroundTasks로 호출되어 앱 대기 시간 최소화
 """
 
 import asyncio
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DrainageData
 
+# CRI 보정: 저지대일 때 가중치 (저지대 + 쓰레기 많음 = CRI 최고점)
+LOWLAND_CRI_BOOST = 15  # 0~100 기준 가점
+
 
 async def trigger_ml_analysis(session: AsyncSession, location_id: str) -> None:
     """
-    데이터 수신 시 ML 분석을 트리거.
-    실제 구현: Stats Team의 분석 스크립트 호출 또는 메시지 큐 전달.
-
-    현재: 더미로 priority_score, risk_reason 등 업데이트.
+    최신 레코드 기준으로 CRI·AI 권장조치 산출.
+    저지대(lowland)면 CRI에 가중치 부여.
     """
-    # 최신 drainage 데이터 조회
     stmt = (
         select(DrainageData)
         .where(DrainageData.location_id == location_id)
@@ -33,15 +32,24 @@ async def trigger_ml_analysis(session: AsyncSession, location_id: str) -> None:
     if not row:
         return
 
-    # 더미 ML 분석 (실제로는 Stats Team 모듈 호출)
-    volume = row.volume_L or 0
-    height = row.max_height_mm or 0
-    fill_ratio = min(1.0, (volume / 100) * (height / 200)) if volume and height else 0
-    priority = 1 if fill_ratio > 0.8 else (2 if fill_ratio > 0.5 else 3)
+    # 쓰레기 부피 기반 위험도 (0~1). trash_vol_L 없으면 volume_L·max_height로 대체
+    trash_L = row.trash_vol_L
+    if trash_L is not None:
+        fill_ratio = min(1.0, trash_L / 150.0)  # 150L 기준
+    else:
+        volume = row.volume_L or 0
+        height = row.max_height_mm or 0
+        fill_ratio = min(1.0, (volume / 100) * (height / 200)) if volume and height else 0
+
+    cri_base = int(fill_ratio * 100)
+    is_lowland = (row.elevation_type or "").strip().lower() == "lowland"
+    cri = min(100, cri_base + (LOWLAND_CRI_BOOST if is_lowland else 0))
+
+    priority = 1 if cri >= 80 else (2 if cri >= 50 else 3)
     flood_prob = min(1.0, fill_ratio * 1.2)
-    cri = int(fill_ratio * 100)
     reason = (
-        "부피 과다·유동인구 밀집" if fill_ratio > 0.7
+        "저지대·쓰레기 과다로 즉시 점검 권장" if is_lowland and fill_ratio > 0.5
+        else "부피 과다·유동인구 밀집" if fill_ratio > 0.7
         else "중간 수준 점검 권장" if fill_ratio > 0.4
         else "상대적으로 양호"
     )

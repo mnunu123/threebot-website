@@ -1,298 +1,428 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
-import { MOCK_WORKERS, MOCK_AUDIT_ITEMS, type MockWorker, type MockAuditItem } from "@/data/mock-task-management";
+import { useMemo, useState } from "react";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, XAxis, YAxis } from "recharts";
+import {
+  ChartContainer,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart";
+import DashboardMetricCard from "@/components/ui/dashboard-metric-card";
 
-const TABS = [
-  { id: "assign", label: "작업 지시", desc: "드래그 앤 드롭 작업 할당" },
-  { id: "tracking", label: "실시간 관제", desc: "작업자 위치·동선 추적" },
-  { id: "audit", label: "검수", desc: "작업 전/후 자동 검수" },
-] as const;
+type MetricId = "completed" | "inspectionRate" | "defectRate" | "avgCri" | "workloadByDistrict";
 
-type TabId = (typeof TABS)[number]["id"];
+type TimeSeriesPoint = {
+  date: string;
+  completed: number;
+  inspectionRate: number;
+  defectRate: number;
+  avgCri: number;
+};
 
-/** 드래그로 구역 선택 가능한 지도 영역 (플레이스홀더) */
-function MapSelectionArea({
-  onSelectionComplete,
-  selected,
-}: {
-  onSelectionComplete: (hasSelection: boolean) => void;
-  selected: boolean;
-}) {
-  const [rect, setRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const startRef = useRef<{ x: number; y: number } | null>(null);
+type WorkloadPoint = {
+  district: string;
+  completed: number;
+  pending: number;
+};
 
-  const handleMouseDown = useCallback(
-    (e: React.MouseEvent) => {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      startRef.current = { x, y };
-      setRect(null);
-      onSelectionComplete(false);
-    },
-    [onSelectionComplete]
-  );
+// 빗물받이 작업 관련 목업 시계열 데이터 (과거 → 현재)
+const TIME_SERIES: TimeSeriesPoint[] = [
+  { date: "2025-01", completed: 120, inspectionRate: 78, defectRate: 9, avgCri: 68 },
+  { date: "2025-02", completed: 145, inspectionRate: 82, defectRate: 8, avgCri: 64 },
+  { date: "2025-03", completed: 160, inspectionRate: 85, defectRate: 7, avgCri: 61 },
+  { date: "2025-04", completed: 190, inspectionRate: 88, defectRate: 6, avgCri: 58 },
+  { date: "2025-05", completed: 210, inspectionRate: 90, defectRate: 6, avgCri: 56 },
+  { date: "2025-06", completed: 230, inspectionRate: 91, defectRate: 5, avgCri: 54 },
+  { date: "2025-07", completed: 260, inspectionRate: 93, defectRate: 5, avgCri: 52 },
+  { date: "2025-08", completed: 275, inspectionRate: 94, defectRate: 4, avgCri: 50 },
+];
 
-  const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      if (!startRef.current || !containerRef.current) return;
-      const r = containerRef.current.getBoundingClientRect();
-      const x = e.clientX - r.left;
-      const y = e.clientY - r.top;
-      setRect({
-        x: Math.min(startRef.current.x, x),
-        y: Math.min(startRef.current.y, y),
-        w: Math.abs(x - startRef.current.x),
-        h: Math.abs(y - startRef.current.y),
-      });
-    },
-    []
-  );
+// 자치구별 작업량 분포 목업
+const WORKLOAD_BY_DISTRICT: WorkloadPoint[] = [
+  { district: "강남구", completed: 82, pending: 14 },
+  { district: "서초구", completed: 64, pending: 11 },
+  { district: "송파구", completed: 71, pending: 9 },
+  { district: "관악구", completed: 55, pending: 13 },
+];
 
-  const handleMouseUp = useCallback(() => {
-    if (rect && rect.w > 10 && rect.h > 10) {
-      onSelectionComplete(true);
-    } else {
-      setRect(null);
-      onSelectionComplete(false);
+const METRIC_CONFIG: Record<
+  MetricId,
+  {
+    title: string;
+    description: string;
+    unit: string;
+    formatValue: (v: number) => string;
+  }
+> = {
+  completed: {
+    title: "월별 작업 완료 건수",
+    description: "빗물받이 청소·점검 완료 추이 (과거 → 현재)",
+    unit: "건",
+    formatValue: (v) => v.toLocaleString("ko-KR") + "건",
+  },
+  inspectionRate: {
+    title: "점검 완료율",
+    description: "계획 대비 실제 점검 완료 비율",
+    unit: "%",
+    formatValue: (v) => `${v.toFixed(1)}%`,
+  },
+  defectRate: {
+    title: "이상(불량) 발견 비율",
+    description: "점검 중 이상이 발견된 비율",
+    unit: "%",
+    formatValue: (v) => `${v.toFixed(1)}%`,
+  },
+  avgCri: {
+    title: "평균 침수 위험지수(CRI)",
+    description: "관할 빗물받이 평균 CRI 추이 (낮을수록 양호)",
+    unit: "점",
+    formatValue: (v) => v.toFixed(1),
+  },
+  workloadByDistrict: {
+    title: "자치구별 작업량 분포",
+    description: "주요 자치구별 완료·대기 작업량 비교",
+    unit: "건",
+    formatValue: (v) => v.toLocaleString("ko-KR") + "건",
+  },
+};
+
+const chartConfig: ChartConfig = {
+  completed: {
+    label: "완료 건수",
+    color: "hsl(174 65% 45%)",
+  },
+  inspectionRate: {
+    label: "점검 완료율",
+    color: "hsl(201 96% 32%)",
+  },
+  defectRate: {
+    label: "이상 발견 비율",
+    color: "hsl(25 95% 53%)",
+  },
+  avgCri: {
+    label: "평균 CRI",
+    color: "hsl(262 83% 58%)",
+  },
+  completedWorkload: {
+    label: "완료 작업",
+    color: "hsl(174 65% 45%)",
+  },
+  pendingWorkload: {
+    label: "대기 작업",
+    color: "hsl(32 95% 53%)",
+  },
+};
+
+export default function TaskManagementView() {
+  const [activeMetric, setActiveMetric] = useState<MetricId>("completed");
+
+  const latestPoint = TIME_SERIES[TIME_SERIES.length - 1];
+  const prevPoint = TIME_SERIES[TIME_SERIES.length - 2] ?? latestPoint;
+
+  const summaryCards = useMemo(() => {
+    const diff = (current: number, prev: number) => current - prev;
+    const pct = (cur: number, prev: number) =>
+      prev === 0 ? 0 : ((cur - prev) / prev) * 100;
+
+    return [
+      {
+        id: "completed" as MetricId,
+        value: latestPoint.completed.toLocaleString("ko-KR") + "건",
+        fromValue: prevPoint.completed.toLocaleString("ko-KR"),
+        change: diff(latestPoint.completed, prevPoint.completed),
+        changePct: pct(latestPoint.completed, prevPoint.completed),
+      },
+      {
+        id: "inspectionRate" as MetricId,
+        value: METRIC_CONFIG.inspectionRate.formatValue(latestPoint.inspectionRate),
+        fromValue: METRIC_CONFIG.inspectionRate.formatValue(prevPoint.inspectionRate),
+        change: diff(latestPoint.inspectionRate, prevPoint.inspectionRate),
+        changePct: pct(latestPoint.inspectionRate, prevPoint.inspectionRate),
+      },
+      {
+        id: "defectRate" as MetricId,
+        value: METRIC_CONFIG.defectRate.formatValue(latestPoint.defectRate),
+        fromValue: METRIC_CONFIG.defectRate.formatValue(prevPoint.defectRate),
+        change: diff(latestPoint.defectRate, prevPoint.defectRate),
+        changePct: pct(latestPoint.defectRate, prevPoint.defectRate),
+      },
+      {
+        id: "avgCri" as MetricId,
+        value: METRIC_CONFIG.avgCri.formatValue(latestPoint.avgCri),
+        fromValue: METRIC_CONFIG.avgCri.formatValue(prevPoint.avgCri),
+        change: diff(prevPoint.avgCri, latestPoint.avgCri), // CRI는 감소가 좋음
+        changePct: prevPoint.avgCri === 0 ? 0 : ((prevPoint.avgCri - latestPoint.avgCri) / prevPoint.avgCri) * 100,
+      },
+    ];
+  }, [latestPoint, prevPoint]);
+
+  const renderMainChart = () => {
+    switch (activeMetric) {
+      case "completed":
+        return (
+          <ChartContainer config={chartConfig} className="bg-white rounded-xl border border-slate-200/60 p-6 min-h-[320px]">
+            <AreaChart data={TIME_SERIES} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="grad-completed" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#14b8a6" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="#14b8a6" stopOpacity={0.05} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+              <YAxis tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <Legend content={<ChartLegendContent />} />
+              <Area
+                type="monotone"
+                dataKey="completed"
+                name="완료 건수"
+                stroke="#14b8a6"
+                strokeWidth={2}
+                strokeLinecap="round"
+                fill="url(#grad-completed)"
+              />
+            </AreaChart>
+          </ChartContainer>
+        );
+      case "inspectionRate":
+        return (
+          <ChartContainer config={chartConfig} className="bg-white rounded-xl border border-slate-200/60 p-6 min-h-[320px]">
+            <AreaChart data={TIME_SERIES} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="grad-inspection" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#0d9488" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="#0d9488" stopOpacity={0.05} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+              <YAxis tickFormatter={(v) => `${v}%`} tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent
+                    formatter={(value) => [`${(value as number).toFixed(1)}%`, "점검 완료율"]}
+                  />
+                }
+              />
+              <Legend content={<ChartLegendContent />} />
+              <Area
+                type="monotone"
+                dataKey="inspectionRate"
+                name="점검 완료율"
+                stroke="#0d9488"
+                strokeWidth={2}
+                strokeLinecap="round"
+                fill="url(#grad-inspection)"
+              />
+            </AreaChart>
+          </ChartContainer>
+        );
+      case "defectRate":
+        return (
+          <ChartContainer config={chartConfig} className="bg-white rounded-xl border border-slate-200/60 p-6 min-h-[320px]">
+            <AreaChart data={TIME_SERIES} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="grad-defect" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#f97316" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#f97316" stopOpacity={0.05} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+              <YAxis tickFormatter={(v) => `${v}%`} tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent
+                    formatter={(value) => [`${(value as number).toFixed(1)}%`, "이상 발견 비율"]}
+                  />
+                }
+              />
+              <Legend content={<ChartLegendContent />} />
+              <Area
+                type="monotone"
+                dataKey="defectRate"
+                name="이상 발견 비율"
+                stroke="#f97316"
+                strokeWidth={2}
+                strokeLinecap="round"
+                fill="url(#grad-defect)"
+              />
+            </AreaChart>
+          </ChartContainer>
+        );
+      case "avgCri":
+        return (
+          <ChartContainer config={chartConfig} className="bg-white rounded-xl border border-slate-200/60 p-6 min-h-[320px]">
+            <AreaChart data={TIME_SERIES} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="grad-avgCri" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.05} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+              <YAxis tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+              <ChartTooltip
+                content={
+                  <ChartTooltipContent
+                    formatter={(value) => [`${(value as number).toFixed(1)}`, "평균 CRI"]}
+                  />
+                }
+              />
+              <Legend content={<ChartLegendContent />} />
+              <Area
+                type="monotone"
+                dataKey="avgCri"
+                name="평균 CRI"
+                stroke="#8b5cf6"
+                strokeWidth={2}
+                strokeLinecap="round"
+                fill="url(#grad-avgCri)"
+              />
+            </AreaChart>
+          </ChartContainer>
+        );
+      case "workloadByDistrict":
+        return (
+          <ChartContainer config={chartConfig} className="bg-white rounded-xl border border-slate-200/60 p-6 min-h-[320px]">
+            <BarChart data={WORKLOAD_BY_DISTRICT} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="district" tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+              <YAxis tickLine={false} axisLine={false} tick={{ fill: "#94a3b8", fontSize: 12 }} />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <Legend content={<ChartLegendContent />} />
+              <Bar
+                dataKey="completed"
+                name="완료 작업"
+                stackId="workload"
+                fill="var(--color-completedWorkload)"
+              />
+              <Bar
+                dataKey="pending"
+                name="대기 작업"
+                stackId="workload"
+                fill="var(--color-pendingWorkload)"
+              />
+            </BarChart>
+          </ChartContainer>
+        );
+      default:
+        return null;
     }
-    startRef.current = null;
-  }, [rect, onSelectionComplete]);
-
-  return (
-    <div
-      ref={containerRef}
-      role="application"
-      aria-label="지도에서 드래그하여 구역 선택"
-      className="relative w-full h-[280px] rounded-lg bg-gray-100 border-2 border-dashed border-gray-300 overflow-hidden select-none"
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={() => {
-        startRef.current = null;
-        if (!selected) setRect(null);
-      }}
-      onMouseUp={handleMouseUp}
-    >
-      <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-sm">
-        지도에서 마우스 드래그로 구역을 선택하세요
-      </div>
-      {rect && rect.w > 5 && rect.h > 5 && (
-        <div
-          className="absolute border-2 border-teal-500 bg-teal-500/20 pointer-events-none"
-          style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
-        />
-      )}
-    </div>
-  );
-}
-
-/** 탭 1: 드래그 앤 드롭 작업 지시 */
-function AssignTaskTab() {
-  const [selectedWorkerId, setSelectedWorkerId] = useState<string>("");
-  const [hasSelection, setHasSelection] = useState(false);
-  const [pushSent, setPushSent] = useState(false);
-
-  const handleAssign = () => {
-    if (!hasSelection || !selectedWorkerId) return;
-    setPushSent(true);
-    setTimeout(() => setPushSent(false), 3000);
   };
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-gray-600">
-        구역을 선택한 뒤 작업자를 지정하면 해당 작업자 앱으로 즉시 푸시 알림이 발송됩니다.
-      </p>
-      <MapSelectionArea onSelectionComplete={setHasSelection} selected={hasSelection} />
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-          작업자
-          <select
-            value={selectedWorkerId}
-            onChange={(e) => setSelectedWorkerId(e.target.value)}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm"
-          >
-            <option value="">선택</option>
-            {MOCK_WORKERS.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name} ({w.role})
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          onClick={handleAssign}
-          disabled={!hasSelection || !selectedWorkerId}
-          className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-teal-700"
-        >
-          {pushSent ? "푸시 발송됨 ✓" : "할당 (푸시 발송)"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** 탭 2: 작업자 실시간 위치/동선 */
-function WorkerTrackingTab({ workers }: { workers: MockWorker[] }) {
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-gray-600">
-        GPS 기반 실시간 위치와 지정 경로 준수 여부를 확인합니다. (근무 태만 방지 및 안전 관리)
-      </p>
-      <ul className="space-y-2">
-        {workers.map((w) => (
-          <li
-            key={w.id}
-            className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-3 shadow-sm"
-          >
-            <div>
-              <span className="font-semibold text-gray-800">{w.name}</span>
-              <span className="text-gray-500 text-sm ml-2">({w.role})</span>
-            </div>
-            <div className="flex items-center gap-3 text-sm">
-              <span className="text-gray-500">
-                위도 {w.lat.toFixed(4)}, 경도 {w.lng.toFixed(4)}
-              </span>
-              <span
-                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                  w.onRoute ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
-                }`}
-              >
-                {w.onRoute ? "경로 준수" : "경로 이탈"}
-              </span>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-/** 탭 3: 작업 전/후 자동 검수 (Smart Audit) */
-function AuditTab({ items }: { items: MockAuditItem[] }) {
-  const [approvedIds, setApprovedIds] = useState<Set<string>>(
-    () => new Set(items.filter((i) => i.approved).map((i) => i.id))
-  );
-
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-gray-600">
-        청소 전/후 사진을 나란히 보여주며, AI가 "청소 완료됨(Clean)" 판정을 내린 건만 관리자가 승인할 수 있습니다.
-      </p>
-      <ul className="space-y-4">
-        {items.map((item) => {
-          const canApprove = item.aiVerdict === "clean" && !approvedIds.has(item.id);
-          return (
-            <li
-              key={item.id}
-              className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <span className="font-medium text-gray-800">{item.workerName}</span>
-                <span className="text-sm text-gray-500">{item.locationLabel} · {item.taskDate}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-4 mb-3">
-                <div>
-                  <p className="text-xs font-medium text-gray-500 mb-1">청소 전</p>
-                  <div className="aspect-video rounded-lg bg-gray-200 flex items-center justify-center text-gray-500 text-sm">
-                    {item.beforeImageUrl ? (
-                      <img src={item.beforeImageUrl} alt="청소 전" className="w-full h-full object-cover rounded-lg" />
-                    ) : (
-                      "사진 없음"
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-gray-500 mb-1">청소 후</p>
-                  <div className="aspect-video rounded-lg bg-gray-200 flex items-center justify-center text-gray-500 text-sm">
-                    {item.afterImageUrl ? (
-                      <img src={item.afterImageUrl} alt="청소 후" className="w-full h-full object-cover rounded-lg" />
-                    ) : (
-                      "사진 없음"
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <span
-                  className={`text-sm font-medium ${
-                    item.aiVerdict === "clean"
-                      ? "text-emerald-600"
-                      : item.aiVerdict === "not_clean"
-                        ? "text-amber-600"
-                        : "text-gray-500"
-                  }`}
-                >
-                  AI 판정:{" "}
-                  {item.aiVerdict === "clean"
-                    ? "청소 완료됨 (Clean)"
-                    : item.aiVerdict === "not_clean"
-                      ? "미완료"
-                      : "대기 중"}
-                </span>
-                {approvedIds.has(item.id) ? (
-                  <span className="text-sm text-emerald-600 font-medium">승인 완료</span>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={!canApprove}
-                    onClick={() => setApprovedIds((s) => new Set(s).add(item.id))}
-                    className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-teal-700"
-                  >
-                    승인
-                  </button>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-export default function TaskManagementView() {
-  const [activeTab, setActiveTab] = useState<TabId>("assign");
-
-  return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-[#e8eaed]">
-      <header className="shrink-0 px-4 py-3 bg-white border-b border-gray-200">
-        <p className="text-sm text-teal-600 font-medium">
-          전화 통화 없이, 클릭 한 번으로 작업자를 보낸다.
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-gradient-to-br from-slate-50 via-teal-50/30 to-cyan-50/40">
+      <header className="shrink-0 px-4 py-4 bg-white/80 backdrop-blur-sm border-b border-slate-200/80 shadow-sm">
+        <p className="text-sm font-medium bg-gradient-to-r from-teal-600 to-cyan-600 bg-clip-text text-transparent">
+          과거부터 지금까지의 작업 데이터를 한 눈에 보고, 클릭으로 지표를 바꿔보세요.
         </p>
-        <h1 className="text-xl font-bold text-gray-800 mt-0.5">작업관리 · 스마트 작업 할당 및 관제</h1>
+        <h1 className="text-xl font-bold text-slate-800 mt-1 tracking-tight">
+          작업관리 · 스마트 작업 현황 및 성과 분석
+        </h1>
       </header>
 
-      <div className="shrink-0 border-b border-gray-200 bg-white px-4">
-        <nav className="flex gap-0" aria-label="작업관리 탭">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.id
-                  ? "border-teal-600 text-teal-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-
       <div className="flex-1 min-h-0 overflow-auto p-4">
-        <div className="max-w-4xl mx-auto">
-          {activeTab === "assign" && <AssignTaskTab />}
-          {activeTab === "tracking" && <WorkerTrackingTab workers={MOCK_WORKERS} />}
-          {activeTab === "audit" && <AuditTab items={MOCK_AUDIT_ITEMS} />}
+        <div className="max-w-6xl mx-auto space-y-5">
+          {/* 상단 KPI 카드 (클릭 시 차트 전환) */}
+          <section aria-label="핵심 작업 지표 요약" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {summaryCards.map((card) => {
+              const metric = METRIC_CONFIG[card.id];
+              const changeAbs = Math.abs(card.changePct ?? 0);
+              const isUp =
+                card.id === "defectRate" || card.id === "avgCri"
+                  ? (card.changePct ?? 0) > 0
+                  : (card.changePct ?? 0) > 0;
+              const trendType = changeAbs === 0 ? "neutral" : isUp ? "up" : "down";
+              const trendBadge =
+                changeAbs === 0 ? "" : `${(card.changePct ?? 0) > 0 ? "↑" : "↓"} ${Math.abs(card.changePct ?? 0).toFixed(1)}%`;
+              const isActive = activeMetric === card.id;
+
+              return (
+                <button
+                  key={card.id}
+                  type="button"
+                  onClick={() => setActiveMetric(card.id)}
+                  className={`
+                    w-full text-left rounded-xl p-[3px] transition-all duration-200
+                    focus:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 focus-visible:ring-offset-2
+                    ${isActive ? "ring-2 ring-teal-500 ring-offset-2 ring-offset-white shadow-md shadow-teal-500/20" : "hover:shadow-md"}
+                  `}
+                >
+                  <DashboardMetricCard
+                    value={card.value}
+                    title={metric.title}
+                    fromValue={card.fromValue}
+                    trendChange={trendBadge}
+                    trendType={trendType}
+                    badgeStyle
+                    className="h-full"
+                  />
+                </button>
+              );
+            })}
+          </section>
+
+          {/* 메인 차트 영역 */}
+          <section aria-label="시간에 따른 작업 지표" className="space-y-2">
+            <div className="flex items-baseline justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-slate-800">
+                  {METRIC_CONFIG[activeMetric].title}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {METRIC_CONFIG[activeMetric].description}
+                </p>
+              </div>
+            </div>
+            <div className="rounded-2xl shadow-xl shadow-slate-200/40 border border-slate-200/60 overflow-hidden">
+              {renderMainChart()}
+            </div>
+          </section>
+
+          {/* 간단 표 요약 */}
+          <section
+            aria-label="요약 테이블"
+            className="bg-white/90 backdrop-blur-sm rounded-2xl border border-slate-200/60 shadow-md p-5 text-xs text-slate-700"
+          >
+            <h3 className="font-semibold text-sm mb-3 text-slate-800">최근 3개월 요약</h3>
+            <div className="overflow-x-auto rounded-lg border border-slate-200/60">
+              <table className="min-w-full border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-teal-50/30">
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">월</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">완료 건수</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">점검 완료율</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">이상 발견 비율</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider">평균 CRI</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {TIME_SERIES.slice(-3).map((row, idx) => (
+                    <tr
+                      key={row.date}
+                      className={`border-b border-slate-100 last:border-0 transition-colors hover:bg-teal-50/30 ${
+                        idx % 2 === 0 ? "bg-white" : "bg-slate-50/50"
+                      }`}
+                    >
+                      <td className="px-4 py-3 whitespace-nowrap font-medium text-slate-700">{row.date}</td>
+                      <td className="px-4 py-3 tabular-nums text-slate-600">{row.completed.toLocaleString("ko-KR")}</td>
+                      <td className="px-4 py-3 tabular-nums text-slate-600">{row.inspectionRate.toFixed(1)}%</td>
+                      <td className="px-4 py-3 tabular-nums text-slate-600">{row.defectRate.toFixed(1)}%</td>
+                      <td className="px-4 py-3 tabular-nums text-slate-600">{row.avgCri.toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
         </div>
       </div>
     </div>
   );
 }
+

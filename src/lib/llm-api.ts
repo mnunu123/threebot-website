@@ -3,8 +3,8 @@
  * Novarobotics AI Platform — vLLM(Qwen-32B) 백엔드 연동
  */
 
-/** 노바로보틱스 GPU 서버 (Serveo 터널) */
-const DEFAULT_LLM_BASE_URL = "https://35833531ca5e62b6-155-230-43-23.serveousercontent.com";
+/** 노바로보틱스 LLM API (ngrok 터널) — base만 지정, /v1/chat/completions 는 코드에서 붙임 */
+const DEFAULT_LLM_BASE_URL = "https://unmummied-arlette-overdrily.ngrok-free.dev";
 
 export const LLM_API_BASE =
   typeof process !== "undefined"
@@ -93,6 +93,7 @@ export async function chatCompletion(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
+        "ngrok-skip-browser-warning": "true",
       },
       body: JSON.stringify(body),
       signal: controller.signal,

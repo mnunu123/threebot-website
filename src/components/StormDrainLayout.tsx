@@ -15,8 +15,13 @@ import type { FlyToFn } from "@/components/NaverMap";
 import type { StormDrainItem } from "@/types/storm-drain";
 import type { MainViewType } from "@/constants/main-view";
 import { MOCK_STORM_DRAINS } from "@/data/mock-storm-drains";
-import { getDrainIdByManageNo } from "@/data/mock-drain-detail";
+import { MOCK_DRAIN_DETAIL } from "@/data/mock-drain-detail";
+import type { DrainDetailDummy } from "@/data/mock-drain-detail";
 import { computeOptimalRoute } from "@/lib/optimal-route";
+import {
+  fetchStormDrainsFromApi,
+  fetchDrainDetailFromApi,
+} from "@/lib/drainage-api";
 import type { DistrictPolygon } from "@/data/district-boundaries";
 import { MovingBorderButton } from "@/components/ui/moving-border-button";
 import { getEnvConfig } from "@/config/env";
@@ -103,9 +108,34 @@ export default function StormDrainLayout() {
   const [mapFilters, setMapFilters] = useState<MapFilterValues>(getDefaultFilterValues);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [selectedDistrictName, setSelectedDistrictName] = useState<string | null>(null);
+  const [drainList, setDrainList] = useState<StormDrainItem[]>(MOCK_STORM_DRAINS);
+  const [selectedDetail, setSelectedDetail] = useState<DrainDetailDummy | null>(null);
   const flyToRef = useRef<FlyToFn | null>(null);
   /** 로드가 끝난 뒤에만 저장하도록 해서, 빈 상태로 덮어쓰지 않음 */
   const chatStorageReadyRef = useRef(false);
+
+  /** DB 연동: 백엔드 설정 시 /api/drainage에서 목록 로드, 미설정/실패 시 목업 유지 */
+  useEffect(() => {
+    fetchStormDrainsFromApi()
+      .then((list) => {
+        if (list != null && list.length > 0) setDrainList(list);
+      })
+      .catch(() => {});
+  }, []);
+
+  /** 선택한 빗물받이 상세: API 우선, 없으면 목업 */
+  useEffect(() => {
+    if (!selectedId) {
+      setSelectedDetail(null);
+      return;
+    }
+    const mockDetail = MOCK_DRAIN_DETAIL[selectedId];
+    fetchDrainDetailFromApi(selectedId)
+      .then((res) => {
+        setSelectedDetail(res?.detail ?? mockDetail ?? null);
+      })
+      .catch(() => setSelectedDetail(mockDetail ?? null));
+  }, [selectedId]);
 
   /** 채팅 목록·선택 상태 localStorage 복원 (탭 전환/새로고침 후에도 유지) */
   useEffect(() => {
@@ -187,7 +217,7 @@ export default function StormDrainLayout() {
   }, [districtBoundariesData, effectiveDistrict, showDistrictBoundaries]);
 
   const filteredDrainItems = useMemo(() => {
-    let list = MOCK_STORM_DRAINS;
+    let list = drainList;
     if (effectiveDistrict !== "전체") {
       if (mapFilters.gunGu !== "전체") {
         list = list.filter((i) => i.address.includes(mapFilters.gunGu));
@@ -206,7 +236,7 @@ export default function StormDrainLayout() {
       list = list.filter((i) => (i.cri ?? 0) >= 50);
     }
     return list;
-  }, [mapFilters, effectiveDistrict]);
+  }, [drainList, mapFilters, effectiveDistrict]);
 
   /** 실시간 필터에서 시·군·구 선택 시 해당 구역 경계만 표시 (데이터 없으면 로드) */
   useEffect(() => {
@@ -277,7 +307,7 @@ export default function StormDrainLayout() {
   }, [mainView, chats.length]);
 
   const selectedItem = selectedId
-    ? MOCK_STORM_DRAINS.find((d) => d.id === selectedId) ?? null
+    ? drainList.find((d) => d.id === selectedId) ?? null
     : null;
 
   const handleSelectFromList = useCallback((item: StormDrainItem) => {
@@ -289,12 +319,14 @@ export default function StormDrainLayout() {
   const handleSelectByCode = useCallback(
     (code: string) => {
       if (!isValidDrainCode(code)) return;
-      const drainId = getDrainIdByManageNo(code);
-      if (!drainId) return;
-      const item = MOCK_STORM_DRAINS.find((d) => d.id === drainId);
+      const normalized = code.trim().toUpperCase();
+      const item = drainList.find(
+        (d) =>
+          (d.manageNo?.toUpperCase() === normalized || d.id.toUpperCase() === normalized)
+      );
       if (item) handleSelectFromList(item);
     },
-    [handleSelectFromList]
+    [drainList, handleSelectFromList]
   );
 
   const handleSelectFromMap = useCallback((item: StormDrainItem) => {
@@ -444,6 +476,7 @@ export default function StormDrainLayout() {
               {selectedItem && (
                 <RightPanel
                   item={selectedItem}
+                  detail={selectedDetail}
                   onClose={() => setSelectedId(null)}
                   onPriorityItemSelect={handleSelectByCode}
                 />

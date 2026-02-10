@@ -18,15 +18,24 @@ async def list_drainage(
     limit: int = Query(50, le=200),
     db: AsyncSession = Depends(get_db),
 ) -> list[DrainageDataOut]:
-    """최근 빗물받이 데이터 목록 조회."""
+    """location_id당 최신 1건만 반환 (웹 지도 중복 마커 방지)."""
     stmt = (
         select(DrainageData)
         .order_by(DrainageData.created_at.desc())
-        .limit(limit)
+        .limit(limit * 3)
     )
     result = await db.execute(stmt)
     rows = result.scalars().all()
-    return [DrainageDataOut.model_validate(r) for r in rows]
+    seen: set[str] = set()
+    out: list[DrainageDataOut] = []
+    for r in rows:
+        if r.location_id in seen:
+            continue
+        seen.add(r.location_id)
+        out.append(DrainageDataOut.model_validate(r))
+        if len(out) >= limit:
+            break
+    return out
 
 
 @router.get("/{location_id}", response_model=Optional[DrainageDataOut])
